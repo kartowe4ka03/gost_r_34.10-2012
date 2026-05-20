@@ -1,4 +1,3 @@
-import pandas as pd
 from random import randint
 
 class Ellipic:
@@ -188,7 +187,7 @@ class Ellipic:
         
         for _ in range(t):
             a = randint(2, k)
-            r, _ = Ellipic.mod_pow(a=a, k=k, n=n)
+            r = Ellipic.mod_pow(a=a, k=k, n=n)
             if r != 1:
                 return False
 
@@ -196,7 +195,7 @@ class Ellipic:
     
 
     @staticmethod
-    def mod_pow(a: int, k: int, n: int) -> tuple[int, pd.DataFrame]:
+    def mod_pow(a: int, k: int, n: int) -> int:
         """
         Возведение a в степень k по модулю n с формированием таблицы вычислений.
 
@@ -210,8 +209,7 @@ class Ellipic:
         # Шаг 1
         b = 1
         if k == 0:
-            df = pd.DataFrame([{"k": 0, "A": a % n, "b": b}])
-            return b, df
+            return b
 
         # Шаг 2
         A = a % n
@@ -242,8 +240,7 @@ class Ellipic:
 
             rows.append({"k": ki, "A": A, "b": b})
 
-        df = pd.DataFrame(rows)
-        return b, df
+        return b
         
 
 if __name__ == "__main__":

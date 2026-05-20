@@ -1,66 +1,73 @@
 from pygost.gost3411_12 import GOST341112
 from elliptic import Ellipic
 from random import randint
+from pathlib import Path
 
 
-def get_ecp_params(a: int, b: int, p: int):
+def get_ecp_params(a: int, 
+                   b: int, 
+                   p: int, 
+                   q: int = 0,
+                   P: tuple[int, int] = 0,
+                   Q: tuple[int, int] = 0,
+                   d: int = 0,
+                   auto: bool = False):
     E = Ellipic(p=p, a=a, b=b)
 
-    prime_ords: dict[int: int] = {}
-    counter: int = 0
-    for O in E.ORDS:
-        if E.farm_theory(n=O, t=10):
-            prime_ords[counter] = O
-            counter += 1
+    if not auto:
+        prime_ords: dict[int: int] = {}
+        counter: int = 0
+        for O in E.ORDS:
+            if E.farm_theory(n=O, t=10):
+                prime_ords[counter] = O
+                counter += 1
 
-    if not prime_ords:
-        raise ValueError("Не вычислено ни одного простого "
-                         "порядка подгруппы эллиптической кривой\n"
-                         "Задайте другие параметры эллиптической кривой")
-    
-    print(f"Найдено {len(prime_ords)} простых порядков подгруппы "
-        "эллиптической кривой")
-    for key, val in prime_ords.items():
-        print(key, val, sep=': ')
+        if not prime_ords:
+            raise ValueError("Не вычислено ни одного простого "
+                            "порядка подгруппы эллиптической кривой\n"
+                            "Задайте другие параметры эллиптической кривой")
+        
+        print(f"Найдено {len(prime_ords)} простых порядков подгруппы эллиптической кривой")
 
-    while True:
-        ord_idx: int = int(input(f"Выберите подгруппу по номеру (0-{len(prime_ords)-1}): "))
-        if 0 <= ord_idx <= (len(prime_ords)-1):
-            break
+        while True:
+            ord_idx: int = int(input(f"Выберите подгруппу по номеру (0-{len(prime_ords)-1}): "))
+            if 0 <= ord_idx <= (len(prime_ords)-1):
+                break
 
-    q: int = prime_ords[ord_idx]
+        q: int = prime_ords[ord_idx]
 
     filtered_subgroups: dict[tuple: list] = E.filter_by_ord(subgroups=E.subgroups, O=q)
-    available_points = {
-                        idx: point
-                        for idx, point in enumerate(filtered_subgroups.keys())
-    }
+    
+    if not auto: 
+        available_points = {
+                            idx: point
+                            for idx, point in enumerate(filtered_subgroups.keys())
+        }
 
-    print(f"Найдено {len(available_points)} образующих точек подгруппы с порядком {q=}")
+        print(f"Найдено {len(available_points)} образующих точек подгруппы с порядком {q=}")
 
-    for key, val in available_points.items():
-        print(key, val, sep=': ')
+        while True:
+            P_idx = int(input(f"Выберите образующую точку подгруппы по номеру (0-{len(available_points)-1}): "))
+            if 0 <= P_idx <= (len(available_points)-1):
+                break
 
-    while True:
-        P_idx = int(input(f"Выберите образующую точку подгруппы по номеру (0-{len(prime_ords)-1}): "))
-        if 0 <= P_idx <= (len(available_points)-1):
-            break
-
-    P: tuple[int, int] = available_points[P_idx]
-    calculations_P_subgroup: dict[int: tuple] = filtered_subgroups[P][0]
-
-    print(f'Выбрана подгруппа порядка {q=}\n'
+        P: tuple[int, int] = available_points[P_idx]
+        print(f'Выбрана подгруппа порядка {q=}\n'
           f"Выбрана образующая точка подгруппы {P=}")
 
-    while True:
-        d = int(input(f"Укажите значение для ключа подписи (0 < d < {q}): "))
-        if 0 < d < q:
-            break
+    calculations_P_subgroup: dict[int: tuple] = filtered_subgroups[P][0]
+    
+    if not auto:
+        while True:
+            d = int(input(f"Укажите значение для ключа подписи (0 < d < {q}): "))
+            if 0 < d < q:
+                break
+    if not Q:
+        Q: tuple[int, int] = calculations_P_subgroup[d]
 
-    Q: tuple[int, int] = calculations_P_subgroup[d]
     calculations_Q_subgroup = filtered_subgroups[Q][0]
 
-    return E, q, calculations_P_subgroup, calculations_Q_subgroup, d
+    return E, q, P, calculations_P_subgroup, Q, calculations_Q_subgroup, d
 
 
 def generate_ecp(message: bytes,
@@ -103,7 +110,6 @@ def generate_ecp(message: bytes,
         if s != 0:
             break
     
-    print(r, s)
     # Шаг 6: Вычислить двоичные вектора r и s
     byte_length = bits // 8
     r_bytes = r.to_bytes(byte_length, 'big')
@@ -167,7 +173,7 @@ def verify_ecp(message: bytes,
 if __name__ == "__main__":
     test_message = b'Hello, world!'
 
-    E, q, calculations_P_subgroup, calculations_Q_subgroup, d = get_ecp_params(a=42, b=5, p=103)
+    E, q, P, calculations_P_subgroup, Q, calculations_Q_subgroup, d = get_ecp_params(a=42, b=5, p=103)
     ksi= generate_ecp(message=test_message,
                        q=q,
                        calculations_P_subgroup=calculations_P_subgroup,
