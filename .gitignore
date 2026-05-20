@@ -1,3 +1,9 @@
 *.docx
 *.pdf
+*.txt
 /книги
+/__pycache__
+/pygost_0_15-master
+test1.py
+test2.py
+test3.py
