@@ -17,7 +17,6 @@ from pathlib import Path
 from shutil import copy2
 
 from params import Params
-from elliptic import Ellipic
 
 
 logger = logging.getLogger(__name__)
@@ -118,7 +117,7 @@ def write_file(
     # =========================================
     # 2. Каталог конкретного файла
     # =========================================
-    file_dir = signatures_dir / source_file.name
+    file_dir = Params.PROJECT_ROOT / signatures_dir / source_file.name
 
     if file_dir.exists():
         if not overwrite:
@@ -143,7 +142,7 @@ def write_file(
     # =========================================
     # 4. Сохранение подписи
     # =========================================
-    signature_path = file_dir / "signature.sig"
+    signature_path = file_dir / f"{source_file.name}.sig"
 
     with signature_path.open("wb") as f:
         f.write(signature)
@@ -189,10 +188,10 @@ def save_signature_params(
         'q': q,
         "P": list(P),
         "Q": list(Q),
-        "bits": bits,
+        "HASHSIZE": bits,
     }
 
-    filepath = Path(filepath)
+    filepath = Params.PROJECT_ROOT / 'signatures' / filepath.name / "METADATA.json"
 
     with filepath.open("w", encoding="utf-8") as f:
         json.dump(
@@ -219,7 +218,7 @@ def load_signature_params(filepath: str | Path) -> dict:
             'q': int,
             'P': tuple[int, int],
             'Q': tuple[int, int],
-            'bits': int
+            'HASHSIZE': int
         }
 
     Raises:
@@ -231,19 +230,19 @@ def load_signature_params(filepath: str | Path) -> dict:
     with filepath.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
-    bits = data["bits"]
+    bits = data["HASHSIZE"]
 
     if bits not in (256, 512):
         raise ValueError("Некорректное значение bits")
 
     params = {
-        "a": data["curve"]["a"],
-        "b": data["curve"]["b"],
-        "p": data["curve"]["p"],
+        "a": data["elliptic"]["a"],
+        "b": data["elliptic"]["b"],
+        "p": data["elliptic"]["p"],
         "q": data["q"],
         "P": tuple(data["P"]),
         "Q": tuple(data["Q"]),
-        "bits": bits,
+        "HASHSIZE": bits,
     }
 
     return params
@@ -252,7 +251,7 @@ def load_signature_params(filepath: str | Path) -> dict:
 # ──────────────────────────────────────────────────────────────────────
 # Загрузка и валидация конфигурации
 # ──────────────────────────────────────────────────────────────────────
-def load_config(mode: str = 'all') -> dict:
+def load_config() -> dict:
     """
     Загружает конфигурацию из .env-файла, валидирует все параметры
     и возвращает готовый словарь.
@@ -278,23 +277,19 @@ def load_config(mode: str = 'all') -> dict:
             Params.ENV_FILE,
         )
 
-    if mode == 'logging':
-        # ── Логирование ───────────────────────────────────────────────────
-        log_level = os.environ.get("LOG_LEVEL", "DEBUG").strip().upper()
-        if log_level not in Params._VALID_LOG_LEVELS:
-            logger.warning(
-                "LOG_LEVEL: недопустимое значение '%s'. Установлен уровень DEBUG.",
-                log_level,
-            )
-            log_level = "DEBUG"
+    # ── Логирование ───────────────────────────────────────────────────
+    log_level = os.environ.get("LOG_LEVEL", "DEBUG").strip().upper()
+    if log_level not in Params._VALID_LOG_LEVELS:
+        logger.warning(
+            "LOG_LEVEL: недопустимое значение '%s'. Установлен уровень DEBUG.",
+            log_level,
+        )
+        log_level = "DEBUG"
 
-        return log_level
+    config['LOG_LEVEL'] = log_level
     
     # ── Файлы ─────────────────────────────────────────────────────────
     default_input_file  = Path(os.environ.get("DEFAULT_INPUT_FILE",  "initial_text.txt").strip())
-
-    if not default_input_file.exists():
-        errors.append(f"Input filename: file not found: {default_input_file}")
 
     config['INPUT_FILE'] = default_input_file
 
@@ -308,93 +303,84 @@ def load_config(mode: str = 'all') -> dict:
 
     config['APP_MODE'] = app_mode
 
-    if app_mode == 'generate':
-        # ── Поведение приложения ──────────────────────────────────────────
-        overwrite_raw = os.environ.get("OVERWRITE", "true")
-        try:
-            if overwrite_raw.strip().lower() == "true":
-                overwrite = True
-            
-            elif overwrite_raw.strip().lower() == "false":
-                overwrite = False
-
-            else:
-                raise ValueError(
-                                f"OVERWRITE имеет недопустимое значение '{overwrite_raw}'. "
-                                f"Допустимые значения: true, false."
-                )
-
-        except ValueError as e:
-            errors.append(str(e))
+    # ── Поведение приложения ──────────────────────────────────────────
+    overwrite_raw = os.environ.get("OVERWRITE", "true")
+    try:
+        if overwrite_raw.strip().lower() == "true":
             overwrite = True
-
-        config['OVERWRITE'] = overwrite
-
-        # ── Параметры эллиптической кривой ────────────────────────────────
-        a: int = int(os.environ.get('a', 0))
-        if not a:
-            errors.append(f"Elliptic param a: не задан коэффициент эллиптической кривой: {a=}.")
-
-        config['a'] = a
-
-        b: int = int(os.environ.get('b', 0))
-        if not b:
-            errors.append(f"Elliptic param b: не задан коэффициент эллиптической кривой: {b=}.")
         
-        config['b'] = b
+        elif overwrite_raw.strip().lower() == "false":
+            overwrite = False
 
-        p: int = int(os.environ.get('p', 0))
-        if not p:
-            errors.append(f"Elliptic param p: не задан модуль эллиптической кривой: {p=}.")
-
-        is_prime: bool = Ellipic.farm_theory(n=p, t=10)
-        if not is_prime:
-            errors.append(f"Elliptic param p: модуль эллиптической кривой {p=} должен быть простым числом.")
-
-        config['p'] = p
-
-        q: int = int(os.environ.get('q', 0))
-        if not q:
-            errors.append(f"Elliptic param q: не задан порядок подгруппы эллиптической кривой: {q=}.")
-        
-        is_prime: bool = Ellipic.farm_theory(n=q, t=10)
-        if not is_prime:
-            errors.append("Elliptic param q: порядок подгруппы эллиптической кривой "
-                        f"{q=} должен быть простым числом.")
-
-        config['q'] = q
-
-        P: str | int = os.environ.get('POINT', 0)
-        if not P:
-            errors.append(f"Elliptic param P: не задана точка эллиптической кривой: {P=}.")
-
-        P: tuple[int, int] = tuple(int(x.strip()) for x in P.strip('()').split(','))
-
-        config['P'] = P
-
-        d: int = int(os.environ.get('d', 0))
-        if not d:
-            errors.append(f"Elliptic param d: не задан коэффициент закрытого ключа подписи: {d=}.")
-
-        if not (0 < d < q):
-            errors.append(f"Elliptic param d: недопустимое значение: {d=}.\n"
-                        f"Границы: 0 < {d=} < {q=}")
-        
-        config['d'] = d
-
-        # ── Размер хеш-кода ──────────────────────────────────────────────────
-        try:
-            bits = int(os.environ.get("HASHSIZE", "256").strip())
-            if bits not in Params._VALID_HASH_SIZES:
-                raise ValueError
-        except ValueError:
-            bits = 256
-            errors.append(
-                f"Hashsize param bits: недопустимое значение. "
-                f"Допустимые: {', '.join(str(s) for s in sorted(Params._VALID_HASH_SIZES))}."
+        else:
+            raise ValueError(
+                            f"OVERWRITE имеет недопустимое значение '{overwrite_raw}'. "
+                            f"Допустимые значения: true, false."
             )
 
-        config['HASHSIZE'] = bits
+    except ValueError as e:
+        errors.append(str(e))
+        overwrite = True
+
+    config['OVERWRITE'] = overwrite
+
+    # ── Параметры эллиптической кривой ────────────────────────────────
+    a: int = int(os.environ.get('a', 0))
+    if not a:
+        errors.append(f"Elliptic param a: не задан коэффициент эллиптической кривой: {a=}.")
+
+    config['a'] = a
+
+    b: int = int(os.environ.get('b', 0))
+    if not b:
+        errors.append(f"Elliptic param b: не задан коэффициент эллиптической кривой: {b=}.")
+    
+    config['b'] = b
+
+    p: int = int(os.environ.get('p', 0))
+    if not p:
+        errors.append(f"Elliptic param p: не задан модуль эллиптической кривой: {p=}.")
+
+    config['p'] = p
+
+    q: int = int(os.environ.get('q', 0))
+    if not q:
+        errors.append(f"Elliptic param q: не задан порядок подгруппы эллиптической кривой: {q=}.")
+
+    config['q'] = q
+
+    P: str | int = os.environ.get('POINT', 0)
+    if not P:
+        errors.append(f"Elliptic param P: не задана точка эллиптической кривой: {P=}.")
+
+    P: tuple[int, int] = tuple(int(x.strip()) for x in P.strip('()').split(','))
+
+    config['P'] = P
+
+    d: int = os.environ.get('d', 0)
+    if d:
+        if not (0 < d < q):
+            errors.append(f"Elliptic param d: недопустимое значение: {d=}.\n"
+                            f"Границы: 0 < {d=} < {q=}")
+            
+    else:
+        d = 0
+    
+    config['d'] = d
+
+    # ── Размер хеш-кода ──────────────────────────────────────────────────
+    try:
+        bits = int(os.environ.get("HASHSIZE", "256").strip())
+        if bits not in Params._VALID_HASH_SIZES:
+            raise ValueError
+    except ValueError:
+        bits = 256
+        errors.append(
+            f"Hashsize param bits: недопустимое значение. "
+            f"Допустимые: {', '.join(str(s) for s in sorted(Params._VALID_HASH_SIZES))}."
+        )
+
+    config['HASHSIZE'] = bits
         
     # ── Вывод всех ошибок и выход ─────────────────────────────────────
     if errors:
@@ -404,7 +390,17 @@ def load_config(mode: str = 'all') -> dict:
         sys.exit(1)
 
     logger.debug("Конфигурация успешно загружена и валидирована.")
-    logger.debug("  APP_MODE     = %s", config["APP_MODE"])
+    logger.debug("  LOGGING LEVEL = %s", config["LOG_LEVEL"])
+    logger.debug("  APP_MODE      = %s", config["APP_MODE"])
+    logger.debug("  Elliptic:")
+    logger.debug("  a             = %s", config['a'])
+    logger.debug("  b             = %s", config['b'])
+    logger.debug("  p             = %s", config['p'])
+    logger.debug("  Subgroup params:")
+    logger.debug("  q             = %s", config['q'])
+    logger.debug("  P             = %s", config['P'])
+    logger.debug("  d             = %s", config['d'] if config['d'] else "Undefined")
+    logger.debug("  HASHSIZE      = %s", config['HASHSIZE'])
 
     return config
 

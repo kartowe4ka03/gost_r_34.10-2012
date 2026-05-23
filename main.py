@@ -48,7 +48,7 @@ def setup_logging(log_level: str = "DEBUG") -> None:
     root_logger.addHandler(file_handler)
 
 
-def arg_parse() -> Namespace:
+def arg_parse(config: dict) -> Namespace:
     """
     Парсинг аргументов командной строки.
 
@@ -64,18 +64,10 @@ def arg_parse() -> Namespace:
     # Общие аргументы
     # ----------------------------
     parser.add_argument(
-        "-r",
-        "--read",
-        action="store_true",
-        required=False,
-        help="Режим чтения конфигурации из файла виртуального окружения"
-    )
-
-    parser.add_argument(
         "-f",
         "--file",
         type=Path,
-        required=False,
+        default=config["INPUT_FILE"],
         help="Файл для подписания или проверки"
     )
 
@@ -102,15 +94,6 @@ def arg_parse() -> Namespace:
     # Аргументы generate
     # ----------------------------
     parser.add_argument(
-        "-e",
-        "--elliptic",
-        nargs=3,
-        metavar=("A", "B", "P"),
-        type=int,
-        help="Параметры эллиптической кривой: a b p"
-    )
-
-    parser.add_argument(
         "--bits",
         type=int,
         choices=(256, 512),
@@ -119,9 +102,10 @@ def arg_parse() -> Namespace:
     )
 
     parser.add_argument(
-        "--overwrite",
+        "--no-overwrite",
         action="store_true",
-        help="Разрешить переподписание документа"
+        default=False,
+        help="Запретить переподписание документа"
     )
 
     # ----------------------------
@@ -142,16 +126,6 @@ def arg_parse() -> Namespace:
     args = parser.parse_args()
 
     # ======================================================
-    # Валидация аргументов режима generate
-    # ======================================================
-    if args.generate:
-        if args.elliptic is None:
-            parser.error(
-                "--elliptic обязателен в режиме "
-                "--generate"
-            )
-
-    # ======================================================
     # Валидация аргументов режима verify
     # ======================================================
     if args.verify:
@@ -164,6 +138,52 @@ def arg_parse() -> Namespace:
     return args
 
 
+# ══════════════════════════════════════════════════════════════════════
+# Применение аргументов CLI поверх конфигурации
+# ══════════════════════════════════════════════════════════════════════
+def _merge_args_into_config(config: dict, args: Namespace) -> dict:
+    """
+    Объединяет конфигурацию из .env с аргументами CLI.
+    Аргументы CLI имеют приоритет над значениями из .env.
+
+    Args:
+        config (dict):              Конфигурация из .env.
+        args (argparse.Namespace):  Аргументы из командной строки.
+
+    Returns:
+        dict: Итоговая конфигурация.
+    """
+    logger = logging.getLogger(__name__)
+
+    # Входной / выходной файл
+    config["INPUT_FILE"]  = args.file
+
+    # Направление операции: CLI-флаги перекрывают APP_MODE из .env
+    if args.generate:
+        config['APP_MODE'] = "generate"
+
+        # Запрет перезаписи: --no-overwrite перекрывает OVERWRITE_OUTPUT=true
+        if args.no_overwrite:
+            config["OVERWRITE"] = False
+    elif args.verify:
+        config['APP_MODE'] = "verify"
+        config['SIGN'] = args.sign
+        config['METADATA'] = args.metadata
+
+    # Иначе остаётся значение из .env
+
+    config['HASHSIZE'] = args.bits
+
+    logger.debug("Итоговая конфигурация после слияния с CLI:")
+    logger.debug("  app_mode        = %s", config["APP_MODE"])
+    logger.debug("  input_file      = %s", config["INPUT_FILE"])
+
+    if args.verify:
+        logger.debug("  overwrite_output= %s", config["OVERWRITE"])
+
+    return config
+
+
 def main():
     # Шаг 1: bootstrap-логирование — нужно уже при load_config()
     setup_logging("DEBUG")
@@ -174,115 +194,134 @@ def main():
     logger.info("Корень проекта: %s", Params.PROJECT_ROOT)
 
     # Шаг 2: получение пользовательского уровня логирования
-    LOG_LEVEL = load_config(mode='logging')
+    config = load_config()
 
     # Шаг 3: переинициализация логирования с уровнем из конфига
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
-    setup_logging(LOG_LEVEL)
+    setup_logging(config['LOG_LEVEL'])
     # Логгер нужно получить заново — уровень мог измениться
     logger = logging.getLogger(__name__)
 
     # Шаг 4: парсинг CLI
-    AUTO = False
-    ecp_params = {}
-    args = arg_parse()
-    if args.read:
-        AUTO = True
-        config = load_config()
-        mode = config['APP_MODE']
-        input_path: Path = config['INPUT_FILE']
+    args: Namespace = arg_parse(config=config)
+    config = _merge_args_into_config(config, args)
+    MODE = config['APP_MODE']
 
-        if mode == 'generate':
-            OVERWRITE = config['OVERWRITE']
-            ecp_params = config.copy()
-            del ecp_params['HASHSIZE'], \
-                ecp_params['INPUT_FILE'],\
-                ecp_params['APP_MODE'],\
-                ecp_params['OVERWRITE']
-            # a = config['a']
-            # b = config['b']
-            # p = config['p']
-            # q = config['q']
-            # P = config['P']
-            # d = config['d']
-            bits = config['HASHSIZE']
+    if MODE == 'generate':
+        match config['d']:
+            case 0: logger.info("Ручной режим подписания файла")
+            case _: logger.info("Автоматический режим подписания файла")
 
-        elif mode == 'verify':
-            # sign = config['SIGN']
-            # metadata = config['METADATA']
-            sign_path = Params.PROJECT_ROOT / 'signatures' / input_path / f'{input_path}.sig'
-            metadata_path = Params.PROJECT_ROOT / 'signatures' / input_path / 'METADATA.JSON'
-            ecp_params = load_signature_params(filepath=metadata_path)
+    elif MODE == 'verify':
+            filename: Path  = config["INPUT_FILE"].name
+            filename_ecp_dir = Params.PROJECT_ROOT / 'signatures' / filename
 
-    else:
-        if args.generate:
-            mode = args.generate
-            OVERWRITE = args.overwrite
-            ecp_params = {
-                      'a': args.elliptic[0],
-                      'b': args.elliptic[1],
-                      'p': args.elliptic[2],
-            }
-            bits = args.bits
+            if not filename_ecp_dir.exists:
+                raise FileNotFoundError(f"Не найдена директория подписанного файла: {filename}")
 
-        elif args.verify:
-            mode = args.verify
-            sign_path = args.sign
-            metadata_path = args.metadata
-            ecp_params = load_signature_params(filepath=metadata_path)
+            config['SIGN'] = filename_ecp_dir / f"{filename}.sig"
 
-        elif not args.generate and not args.verify:
-            raise ValueError("Отсутствует аргумент -g/--generate или -v/--verify\n"
-                             "Справка: python main.py --help")
-            
-        input_path: Path = args.file
+            if not config['SIGN'].exists:
+                raise FileNotFoundError(f"Не найден файл ЭЦП для документа: {filename}")
 
-    # Шаг 5: чтение входного файла
+            config['METADATA'] = filename_ecp_dir / "METADATA.json"
+
+            if not config['METADATA'].exists:
+                raise FileNotFoundError(f"Не найдены метаданные для ЭЦП документа: {filename}")
+
+    # Шаг 5: проверка входного файла
+    input_path: Path  = config["INPUT_FILE"]
+    if not input_path.exists():
+        logger.error("Входной файл не найден: %s", input_path)
+        sys.exit(1)
+
+    if not input_path.is_file():
+        logger.error("Указанный путь не является файлом: %s", input_path)
+        sys.exit(1)
+
+    # Шаг 6: чтение входных файлов
     data = read_file(filename=input_path)
     logger.debug("Прочитано %d байт.", len(data))
 
-    # Шаг 6: запуск операции
-    E, q, \
-    P, calculations_P_subgroup, \
-    Q, calculations_Q_subgroup, d = get_ecp_params(**ecp_params,
-                                                       auto=AUTO,)
-    if mode == 'generate':
-        ksi = generate_ecp(
+    if MODE == 'verify':
+        KSI: bytes = read_file(filename=config['SIGN'])
+        METADATA: dict = load_signature_params(filepath=config['METADATA'])
+
+    # Шаг 7: запуск операции
+    logger.info(
+        "Операция: %s | Размер хеш-кода: %s | Файл: %s",
+        config["APP_MODE"].upper(),
+        config["HASHSIZE"],
+        input_path,
+    )
+
+    if MODE == 'generate':
+        logger.info("Начало подписания: %s", input_path)
+        E, Q, d = get_ecp_params(
+                                 a=config['a'],
+                                 b=config['b'],
+                                 p=config['p'],
+                                 q=config['q'],
+                                 P=config['P'],
+                                 d=config['d'],
+                                 mode=MODE,
+        )
+        KSI = generate_ecp(
                            message=data,
-                           q=q,
-                           calculations_P_subgroup=calculations_P_subgroup,
+                           E=E,
                            d=d,
-                           bits=bits)
-        
-        output = write_file(
-                            source_file=input_path,
-                            signature=ksi,
-                            overwrite=OVERWRITE
+                           bits=config['HASHSIZE'],
         )
 
+        output_path = write_file(
+                                 source_file=input_path,
+                                 signature=KSI,
+                                 overwrite=config['OVERWRITE'],
+        )
         save_signature_params(
-                              filepath=output / "METADATA.JSON",
-                              **ecp_params,
-                              bits=bits
+                              filepath=input_path,
+                              a=config['a'],
+                              b=config['b'],
+                              p=config['p'],
+                              q=config['q'],
+                              P=config['P'],
+                              Q=Q,
+                              bits=config['HASHSIZE'],
         )
-        
-    elif mode == 'verify':
-        ksi = read_file(filename=sign_path)
-        is_verify = verify_ecp(
-                                message=data,
-                                ksi=ksi,
-                                E=E,
-                                q=q,
-                                calculations_P_subgroup=calculations_P_subgroup,
-                                calculations_Q_subgroup=calculations_Q_subgroup,
-                                bits=bits
-        )
-        if is_verify:
-            print(True)
 
+        logger.info("Документ %s подписан и сохранен → %s", input_path, output_path)
+
+    elif MODE == 'verify':
+        logger.info("Начало проверки подписи: %s", input_path)
+        E = get_ecp_params(
+                           a=METADATA['a'],
+                           b=METADATA['b'],
+                           p=METADATA['p'],
+                           q=METADATA['q'],
+                           P=METADATA['P'],
+                           mode=MODE,
+        )
+        is_verified = verify_ecp(
+                                 message=data,
+                                 ksi=KSI,
+                                 E=E,
+                                 Q=METADATA['Q'],
+                                 bits=METADATA['HASHSIZE']
+        )
+        if is_verified:
+            logger.info(
+                        "Подпись %s ДЕЙСТВИТЕЛЬНА для документа %s", 
+                        config['SIGN'],
+                        input_path,
+            )
+            
         else:
-            print(False)
+            logger.warning(
+                           "Подпись %s НЕДЕЙСТВИТЕЛЬНА для документа %s", 
+                           config['SIGN'],
+                           input_path,
+            )
 
 if __name__ == "__main__":
     main()
