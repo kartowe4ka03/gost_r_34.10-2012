@@ -6,7 +6,7 @@ from argparse import ArgumentParser, Namespace
 from params import Params
 from handler import (read_file, write_file, load_config, 
                      save_signature_params, load_signature_params)
-from ecp import get_ecp_params, generate_ecp, verify_ecp
+from ecp import generate_ecp, verify_ecp
 
 
 # ======================================================================
@@ -52,8 +52,11 @@ def arg_parse(config: dict) -> Namespace:
     """
     Парсинг аргументов командной строки.
 
+    Args:
+        config (dict): Словарь параметров из .env
+
     Returns:
-        argparse.Namespace с параметрами запуска.
+        args (Namespace): Параметры запуска.
     """
     parser = ArgumentParser(
         prog="gost-ecp",
@@ -185,6 +188,16 @@ def _merge_args_into_config(config: dict, args: Namespace) -> dict:
 
 
 def main():
+    """
+    Точка входа программы. Управляет полным жизненным циклом проекта:
+
+    1. Bootstrap-логирование (DEBUG) до загрузки .env.
+    2. Загрузка и валидация конфигурации из .env.
+    3. Переинициализация логирования с уровнем из конфига.
+    4. Парсинг аргументов CLI и слияние с конфигурацией.
+    5. Проверка входного файла и условия перезаписи.
+    6. Запуск операции подписания или проверки подписи.
+    """
     # Шаг 1: bootstrap-логирование — нужно уже при load_config()
     setup_logging("DEBUG")
     logger = logging.getLogger(__name__)
@@ -215,19 +228,19 @@ def main():
 
     elif MODE == 'verify':
             filename: Path  = config["INPUT_FILE"].name
-            filename_ecp_dir = Params.PROJECT_ROOT / 'signatures' / filename
+            filename_ecp_dir = Params.SIGNATURES_DIR / filename
 
-            if not filename_ecp_dir.exists:
+            if not filename_ecp_dir.exists():
                 raise FileNotFoundError(f"Не найдена директория подписанного файла: {filename}")
 
             config['SIGN'] = filename_ecp_dir / f"{filename}.sig"
 
-            if not config['SIGN'].exists:
+            if not config['SIGN'].exists():
                 raise FileNotFoundError(f"Не найден файл ЭЦП для документа: {filename}")
 
             config['METADATA'] = filename_ecp_dir / "METADATA.json"
 
-            if not config['METADATA'].exists:
+            if not config['METADATA'].exists():
                 raise FileNotFoundError(f"Не найдены метаданные для ЭЦП документа: {filename}")
 
     # Шаг 5: проверка входного файла
@@ -258,19 +271,11 @@ def main():
 
     if MODE == 'generate':
         logger.info("Начало подписания: %s", input_path)
-        E, Q, d = get_ecp_params(
-                                 a=config['a'],
-                                 b=config['b'],
-                                 p=config['p'],
-                                 q=config['q'],
-                                 P=config['P'],
-                                 d=config['d'],
-                                 mode=MODE,
-        )
-        KSI = generate_ecp(
+
+        KSI, Q = generate_ecp(
                            message=data,
-                           E=E,
-                           d=d,
+                           elliptic_params=config['ELLIPTIC_PARAMS'],
+                           d=config['d'],
                            bits=config['HASHSIZE'],
         )
 
@@ -281,11 +286,7 @@ def main():
         )
         save_signature_params(
                               filepath=input_path,
-                              a=config['a'],
-                              b=config['b'],
-                              p=config['p'],
-                              q=config['q'],
-                              P=config['P'],
+                              **config['ELLIPTIC_PARAMS'],
                               Q=Q,
                               bits=config['HASHSIZE'],
         )
@@ -294,18 +295,10 @@ def main():
 
     elif MODE == 'verify':
         logger.info("Начало проверки подписи: %s", input_path)
-        E = get_ecp_params(
-                           a=METADATA['a'],
-                           b=METADATA['b'],
-                           p=METADATA['p'],
-                           q=METADATA['q'],
-                           P=METADATA['P'],
-                           mode=MODE,
-        )
         is_verified = verify_ecp(
                                  message=data,
                                  ksi=KSI,
-                                 E=E,
+                                 elliptic_params=METADATA['ELLIPTIC_PARAMS'],
                                  Q=METADATA['Q'],
                                  bits=METADATA['HASHSIZE']
         )
@@ -317,7 +310,7 @@ def main():
             )
             
         else:
-            logger.warning(
+            logger.error(
                            "Подпись %s НЕДЕЙСТВИТЕЛЬНА для документа %s", 
                            config['SIGN'],
                            input_path,

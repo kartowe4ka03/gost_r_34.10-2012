@@ -111,13 +111,12 @@ def write_file(
     # =========================================
     # 1. Проверка/создание папки signatures
     # =========================================
-    signatures_dir = Path("signatures")
-    signatures_dir.mkdir(exist_ok=True)
+    Params.SIGNATURES_DIR.mkdir(exist_ok=True)
 
     # =========================================
     # 2. Каталог конкретного файла
     # =========================================
-    file_dir = Params.PROJECT_ROOT / signatures_dir / source_file.name
+    file_dir = Params.SIGNATURES_DIR / source_file.name
 
     if file_dir.exists():
         if not overwrite:
@@ -191,7 +190,7 @@ def save_signature_params(
         "HASHSIZE": bits,
     }
 
-    filepath = Params.PROJECT_ROOT / 'signatures' / filepath.name / "METADATA.json"
+    filepath = Params.SIGNATURES_DIR / filepath.name / "METADATA.json"
 
     with filepath.open("w", encoding="utf-8") as f:
         json.dump(
@@ -236,13 +235,15 @@ def load_signature_params(filepath: str | Path) -> dict:
         raise ValueError("Некорректное значение bits")
 
     params = {
-        "a": data["elliptic"]["a"],
-        "b": data["elliptic"]["b"],
-        "p": data["elliptic"]["p"],
-        "q": data["q"],
-        "P": tuple(data["P"]),
-        "Q": tuple(data["Q"]),
-        "HASHSIZE": bits,
+              "ELLIPTIC_PARAMS": {
+                                  "a": data["elliptic"]["a"],
+                                  "b": data["elliptic"]["b"],
+                                  "p": data["elliptic"]["p"],
+                                  "q": data["q"],
+                                  "P": tuple(data["P"]),
+              },
+              "Q": tuple(data["Q"]),
+              "HASHSIZE": bits,
     }
 
     return params
@@ -266,6 +267,7 @@ def load_config() -> dict:
     logger = logging.getLogger(__name__)
     errors: list[str] = []
     config: dict = {}
+    elliptic_params: dict = {}
 
     if Params.ENV_FILE.exists():
         load_dotenv(dotenv_path=Params.ENV_FILE)
@@ -325,39 +327,46 @@ def load_config() -> dict:
     config['OVERWRITE'] = overwrite
 
     # ── Параметры эллиптической кривой ────────────────────────────────
-    a: int = int(os.environ.get('a', 0))
+    a = os.environ.get('a', 0)
     if not a:
         errors.append(f"Elliptic param a: не задан коэффициент эллиптической кривой: {a=}.")
+        a = 0
 
-    config['a'] = a
+    elliptic_params['a'] = int(a)
 
-    b: int = int(os.environ.get('b', 0))
+    b = os.environ.get('b', 0)
     if not b:
         errors.append(f"Elliptic param b: не задан коэффициент эллиптической кривой: {b=}.")
+        b = 0
     
-    config['b'] = b
+    elliptic_params['b'] = int(b)
 
-    p: int = int(os.environ.get('p', 0))
+    p = os.environ.get('p', 0)
     if not p:
         errors.append(f"Elliptic param p: не задан модуль эллиптической кривой: {p=}.")
+        p = 0
 
-    config['p'] = p
+    elliptic_params['p'] = int(p)
 
-    q: int = int(os.environ.get('q', 0))
+    q = os.environ.get('q', 0)
     if not q:
         errors.append(f"Elliptic param q: не задан порядок подгруппы эллиптической кривой: {q=}.")
+        q = 0
 
-    config['q'] = q
+    elliptic_params['q'] = int(q)
 
-    P: str | int = os.environ.get('POINT', 0)
+    P = os.environ.get('POINT', 0)
     if not P:
         errors.append(f"Elliptic param P: не задана точка эллиптической кривой: {P=}.")
-
+        P = '(0, 0)'
+    
     P: tuple[int, int] = tuple(int(x.strip()) for x in P.strip('()').split(','))
 
-    config['P'] = P
+    elliptic_params['P'] = P
 
-    d: int = os.environ.get('d', 0)
+    config['ELLIPTIC_PARAMS'] = elliptic_params
+
+    d = os.environ.get('d', 0)
     if d:
         if not (0 < d < q):
             errors.append(f"Elliptic param d: недопустимое значение: {d=}.\n"
@@ -393,12 +402,12 @@ def load_config() -> dict:
     logger.debug("  LOGGING LEVEL = %s", config["LOG_LEVEL"])
     logger.debug("  APP_MODE      = %s", config["APP_MODE"])
     logger.debug("  Elliptic:")
-    logger.debug("  a             = %s", config['a'])
-    logger.debug("  b             = %s", config['b'])
-    logger.debug("  p             = %s", config['p'])
+    logger.debug("  a             = %s", elliptic_params['a'])
+    logger.debug("  b             = %s", elliptic_params['b'])
+    logger.debug("  p             = %s", elliptic_params['p'])
     logger.debug("  Subgroup params:")
-    logger.debug("  q             = %s", config['q'])
-    logger.debug("  P             = %s", config['P'])
+    logger.debug("  q             = %s", elliptic_params['q'])
+    logger.debug("  P             = %s", elliptic_params['P'])
     logger.debug("  d             = %s", config['d'] if config['d'] else "Undefined")
     logger.debug("  HASHSIZE      = %s", config['HASHSIZE'])
 
