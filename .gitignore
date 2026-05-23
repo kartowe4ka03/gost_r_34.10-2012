@@ -3,5 +3,6 @@
 *.log
 *.pdf
 *.txt
+*.zip
 /книги
 /__pycache__
