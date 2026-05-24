@@ -83,6 +83,7 @@ def arg_parse(config: dict) -> Namespace:
         "-g",
         "--generate",
         action="store_true",
+        default=False,
         help="Режим формирования ЭЦП"
     )
 
@@ -90,6 +91,7 @@ def arg_parse(config: dict) -> Namespace:
         "-v",
         "--verify",
         action="store_true",
+        default=False,
         help="Режим проверки ЭЦП"
     )
 
@@ -159,27 +161,38 @@ def _merge_args_into_config(config: dict, args: Namespace) -> dict:
     logger = logging.getLogger(__name__)
 
     # Входной / выходной файл
+    if args.file != config["INPUT_FILE"]:
+        logger.info(
+                    "Исходный файл переопределен через CLI: %s → %s",
+                    config["INPUT_FILE"], args.file)
+        
     config["INPUT_FILE"]  = args.file
 
     # Направление операции: CLI-флаги перекрывают APP_MODE из .env
     if args.generate:
         config['APP_MODE'] = "generate"
 
-        # Запрет перезаписи: --no-overwrite перекрывает OVERWRITE_OUTPUT=true
-        if args.no_overwrite:
-            config["OVERWRITE"] = False
     elif args.verify:
         config['APP_MODE'] = "verify"
         config['SIGN'] = args.sign
         config['METADATA'] = args.metadata
-
     # Иначе остаётся значение из .env
 
-    config['HASHSIZE'] = args.bits
+    # Запрет перезаписи: --no-overwrite перекрывает OVERWRITE_OUTPUT=true
+    if args.no_overwrite:
+        config["OVERWRITE"] = False
+
+    if args.bits == 512 and args.bits != config["HASHSIZE"]:
+        logger.info(
+                    "Длина хеш-кода переопределена через CLI: %s → %s",
+                    config["HASHSIZE"], args.bits)
+        
+        config['HASHSIZE'] = args.bits
 
     logger.debug("Итоговая конфигурация после слияния с CLI:")
-    logger.debug("  app_mode        = %s", config["APP_MODE"])
-    logger.debug("  input_file      = %s", config["INPUT_FILE"])
+    logger.debug("  APP_MODE        = %s", config["APP_MODE"])
+    logger.debug("  OVERWRITE       = %s", config["OVERWRITE"])
+    logger.debug("  INPUT_FILE      = %s", config["INPUT_FILE"])
 
     if args.verify:
         logger.debug("  overwrite_output= %s", config["OVERWRITE"])
@@ -231,17 +244,21 @@ def main():
             filename_ecp_dir = Params.SIGNATURES_DIR / filename
 
             if not filename_ecp_dir.exists():
-                raise FileNotFoundError(f"Не найдена директория подписанного файла: {filename}")
+                logger.error("Не найдена директория подписанного файла: %s", filename)
+                sys.exit(1)
 
             config['SIGN'] = filename_ecp_dir / f"{filename}.sig"
 
             if not config['SIGN'].exists():
-                raise FileNotFoundError(f"Не найден файл ЭЦП для документа: {filename}")
+                logger.error("Не найден файл ЭЦП для документа: %s", filename)
+                sys.exit(1)
 
             config['METADATA'] = filename_ecp_dir / "METADATA.json"
 
             if not config['METADATA'].exists():
-                raise FileNotFoundError(f"Не найдены метаданные для ЭЦП документа: {filename}")
+                logger.error("Не найдены метаданные для ЭЦП документа: %s", filename)
+                sys.exit(1)
+                
 
     # Шаг 5: проверка входного файла
     input_path: Path  = config["INPUT_FILE"]
@@ -252,6 +269,12 @@ def main():
     if not input_path.is_file():
         logger.error("Указанный путь не является файлом: %s", input_path)
         sys.exit(1)
+
+    if MODE == 'generate':
+        path_for_sign = Params.SIGNATURES_DIR / f"{input_path.name}/"
+        if path_for_sign.exists() and not config['OVERWRITE']:
+            logger.error("Переподписание документа запрещено пользователем")
+            sys.exit(1)
 
     # Шаг 6: чтение входных файлов
     data = read_file(filename=input_path)
@@ -317,4 +340,5 @@ def main():
             )
 
 if __name__ == "__main__":
+    sys.argv.append('--no-overwrite')
     main()

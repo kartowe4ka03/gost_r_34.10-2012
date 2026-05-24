@@ -2,7 +2,9 @@
 *.env
 *.log
 *.pdf
+*.tmp
 *.txt
 *.zip
 /книги
 /__pycache__
+/images

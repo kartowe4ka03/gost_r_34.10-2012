@@ -2,6 +2,10 @@ from pygost.gost3411_12 import GOST341112
 from elliptic import Ellipic
 from random import randint
 from getpass import getpass
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 def generate_ecp(
@@ -201,11 +205,15 @@ def generate_ecp(
             if 0 < d < E.q:
                 break
 
+    logger.debug("Закрытый ключ подписи: %s", d)
+
     Q: tuple[int, int] = E.calculate_new_point(P=E.P, n=d)
 
     # Шаг 1: Генерация хеша исходного текста   
     gost = GOST341112(data=message, digest_size=bits)
     H = gost.hexdigest()
+
+    logger.debug("Хеш-код исходного текста: %s", H)
 
     # Шаг 2: Вычислить alpha, e
     alpha = int.from_bytes(bytes.fromhex(H), 'big')
@@ -231,8 +239,13 @@ def generate_ecp(
         if s != 0:
             break
     
+    logger.debug("Расчитано значение r: %s", r)
+    logger.debug("Расчитано значение r: %s", s)
+
     # Шаг 6: Вычислить двоичные вектора r и s
     byte_length = bits // 8
+    logger.debug("Размер двоичных векторов: %s", byte_length)
+
     r_bytes = r.to_bytes(byte_length, 'big')
     s_bytes = s.to_bytes(byte_length, 'big')
 

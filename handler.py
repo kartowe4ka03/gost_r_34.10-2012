@@ -327,40 +327,51 @@ def load_config() -> dict:
     config['OVERWRITE'] = overwrite
 
     # ── Параметры эллиптической кривой ────────────────────────────────
-    a = os.environ.get('a', 0)
+    a = os.environ.get('a', '')
     if not a:
         errors.append(f"Elliptic param a: не задан коэффициент эллиптической кривой: {a=}.")
-        a = 0
+        a = '0'
 
-    elliptic_params['a'] = int(a)
+    elliptic_params['a'] = int(a.upper(), base=16)
 
     b = os.environ.get('b', 0)
     if not b:
         errors.append(f"Elliptic param b: не задан коэффициент эллиптической кривой: {b=}.")
-        b = 0
+        b = '0'
     
-    elliptic_params['b'] = int(b)
+    elliptic_params['b'] = int(b.upper(), base=16)
 
     p = os.environ.get('p', 0)
     if not p:
         errors.append(f"Elliptic param p: не задан модуль эллиптической кривой: {p=}.")
-        p = 0
+        p = '0'
 
-    elliptic_params['p'] = int(p)
+    elliptic_params['p'] = int(p.upper(), base=16)
 
     q = os.environ.get('q', 0)
-    if not q:
+    if q:
+        q = int(q.upper(), base=16)
+
+    else:
         errors.append(f"Elliptic param q: не задан порядок подгруппы эллиптической кривой: {q=}.")
         q = 0
 
-    elliptic_params['q'] = int(q)
+    elliptic_params['q'] = q
 
-    P = os.environ.get('POINT', 0)
-    if not P:
-        errors.append(f"Elliptic param P: не задана точка эллиптической кривой: {P=}.")
-        P = '(0, 0)'
+    x_P = os.environ.get('x_P', 0)
+    if not x_P:
+        errors.append(f"Elliptic param x_P: не задана координата X точки эллиптической кривой: {x_P=}.")
+        x_P = '0'
+
+    y_P = os.environ.get('y_P', 0)
+    if not y_P:
+        errors.append(f"Elliptic param y_P: не задана координата Y точки эллиптической кривой: {y_P=}.")
+        y_P = '0'
     
-    P: tuple[int, int] = tuple(int(x.strip()) for x in P.strip('()').split(','))
+    P: tuple[int, int] = (
+                          int(x_P.upper(), base=16), 
+                          int(y_P.upper(), base=16)
+    )
 
     elliptic_params['P'] = P
 
@@ -368,6 +379,7 @@ def load_config() -> dict:
 
     d = os.environ.get('d', 0)
     if d:
+        d = int(d.upper(), base=16)
         if not (0 < d < q):
             errors.append(f"Elliptic param d: недопустимое значение: {d=}.\n"
                             f"Границы: 0 < {d=} < {q=}")
@@ -401,6 +413,7 @@ def load_config() -> dict:
     logger.debug("Конфигурация успешно загружена и валидирована.")
     logger.debug("  LOGGING LEVEL = %s", config["LOG_LEVEL"])
     logger.debug("  APP_MODE      = %s", config["APP_MODE"])
+    logger.debug("  OVERWRITE     = %s", config["OVERWRITE"])
     logger.debug("  Elliptic:")
     logger.debug("  a             = %s", elliptic_params['a'])
     logger.debug("  b             = %s", elliptic_params['b'])
@@ -415,6 +428,5 @@ def load_config() -> dict:
 
 
 if __name__ == "__main__":
-    zero = 1
-    if not zero:
-        print(zero)
+    my_string = "2BB312A43BD2CE6E0D020613C857ACDDCFBF061E91E5F2C3F32447C259F39B2С83АВ156D77F1496BF7EB3351Е1EE4E43DC1A18В91B24640B6DBB92CB1ADD371Е"
+    print(my_string.replace('А', 'A').replace('В', 'B').replace('С', 'C').replace('Е', 'E'))
